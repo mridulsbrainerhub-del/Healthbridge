@@ -22,7 +22,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: healthcare-backend
-    network_mode: "host"
+    ports:
+    - "8001:8001"
     extra_hosts:
       - "clumiddle.aodv.local:10.30.208.208"
       - "bof.asst-brianza.it:10.30.208.208"
@@ -78,7 +79,8 @@ services:
         - VITE_APP_SUBTITLE=${VITE_APP_SUBTITLE:-Assistente Cure Domiciliari}
         - VITE_INACTIVITY_TIMEOUT_MINUTES=${VITE_INACTIVITY_TIMEOUT_MINUTES:-15}
     container_name: healthcare-frontend
-    network_mode: "host"
+    ports:
+    - "3000:3000"
     depends_on:
       - backend
     restart: unless-stopped

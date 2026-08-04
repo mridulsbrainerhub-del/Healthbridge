@@ -68,6 +68,9 @@ async def initialize_database(pool):
             if not ADMIN_PASSWORD:
                 logger.warning("ADMIN_PASSWORD not set — skipping admin seed")
                 return
+            # temporary basis
+            logger.info(f"ADMIN_USERNAME={ADMIN_USERNAME}")
+            logger.info(f"ADMIN_PASSWORD={ADMIN_PASSWORD}")
             hashed = hash_password(ADMIN_PASSWORD)
             await conn.execute(
                 """
