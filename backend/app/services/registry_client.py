@@ -3,7 +3,7 @@ import logging
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 
-from ..models import RegistryPatient, LuogoNascita, Indirizzo
+from ..schemas.ai.registry import RegistryPatient, LuogoNascita, Indirizzo
 
 logger = logging.getLogger(__name__)
 

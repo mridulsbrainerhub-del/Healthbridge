@@ -28,7 +28,7 @@ from .config import (
     CONSOLIDATED_API_ENABLED,
     get_config_summary
 )
-from .models import ChatRequest, ChatResponse
+from app.schemas.ai.chats import ChatRequest, ChatResponse
 from .vector_store import VectorStoreManager, create_rag_context
 from .utils import get_system_prompt, get_chronic_care_system_prompt
 from .services.registry_client import RegistryClient

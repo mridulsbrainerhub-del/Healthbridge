@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pathlib import Path
 
-from ..models import UnifiedPatient, ClinicalEvent
+from ..schemas.ai.registry import UnifiedPatient, ClinicalEvent
 from .date_utils import normalize_oracle_date
 from .registry_client import RegistryClient
 from .bof_client import BOFClient

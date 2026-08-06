@@ -2,7 +2,7 @@ import httpx
 import logging
 from typing import Optional, List
 
-from ..models import ProtectedDischarge
+from ..schemas.ai.registry import ProtectedDischarge
 
 logger = logging.getLogger(__name__)
 
