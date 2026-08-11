@@ -297,38 +297,7 @@ def main():
 
                     db.add(care_plan)
 
-                        vitals = patient_data.get("vitals_history", [])
-
-            for vital_data in vitals:
-
-                blood_pressure = vital_data.get("blood_pressure")
-
-                systolic = None
-                diastolic = None
-
-                if blood_pressure:
-                    systolic, diastolic = map(
-                        int,
-                        blood_pressure.split("/")
-                    )
-
-                recorded_at = datetime.fromisoformat(
-                    vital_data["date"] + "T00:00:00"
-                )
-
-                vital = Vital(
-                    patient_id=patient_id,
-                    recorded_at=recorded_at,
-                    systolic=systolic,
-                    diastolic=diastolic,
-                    heart_rate=vital_data.get("heart_rate"),
-                    glucose=vital_data.get("glucose"),
-                    weight=vital_data.get("weight_kg"),
-                    spo2=vital_data.get("spo2"),
-                    notes=vital_data.get("notes"),
-                )
-
-                db.add(vital)
+            
 
         db.commit()
 

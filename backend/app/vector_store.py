@@ -5,6 +5,8 @@ from pathlib import Path
 import chromadb
 from openai import OpenAI
 
+from app.services.chronic_care_repo import ChronicCareRepository
+
 from .services.date_utils import calculate_age, normalize_oracle_date
 
 logger = logging.getLogger(__name__)
@@ -310,8 +312,9 @@ class VectorStoreManager:
         openai_client: OpenAI,
         persist_directory: str,
         aurora_data_path: Optional[str] = None,
-        patient_data_schema: str = "aurora",
+        patient_data_schema:str = "aurora",
         chronic_care_data_path: Optional[str] = None,
+        chronic_care_repo:Optional[ChronicCareRepository] = None
     ):
         self.openai_client = openai_client
         self.chroma_client = chromadb.PersistentClient(path=persist_directory)
@@ -324,10 +327,15 @@ class VectorStoreManager:
         self._events: Dict[str, List[Dict[str, Any]]] = {}
 
         # Load and parse data according to the selected schema
-        if self.schema == "chronic_care" and chronic_care_data_path:
-            self._patients = parse_chronic_care_json(chronic_care_data_path)
+        if self.schema == "chronic_care" and chronic_care_repo:
+            self._patients = chronic_care_repo.get_all_patients()
+
+
+        elif self.schema == "chronic care" and chronic_care_data_path:
+            self._patients=  parse_chronic_care_json(chronic_care_data_path)
+
         elif aurora_data_path:
-            self._patients, self._events = parse_aurora_json(aurora_data_path)
+            self._patients, self._events = parse_aurora_json(aurora_data_path)    
 
     def initialize_collection(self):
         """Initialize or get the ChromaDB collection."""
