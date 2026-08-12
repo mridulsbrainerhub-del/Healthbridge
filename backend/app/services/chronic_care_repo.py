@@ -1,4 +1,3 @@
-from datetime import date
 import json
 from typing import Any
 
@@ -140,9 +139,11 @@ class ChronicCareRepository:
 
             patient_data["labs"] = [
                 {
-                    "date": lab.test_date.isoformat()
-                    if lab.test_date
-                    else None,
+                    "date": (
+                        lab.test_date.isoformat()
+                        if lab.test_date
+                        else None
+                    ),
                     "test": lab.test_name,
                     "value": lab.value,
                     "unit": lab.unit,
@@ -284,7 +285,10 @@ class ChronicCareRepository:
 
         return result
 
-    def get_patient(self, patient_code: str) -> dict[str, Any] | None:
+    def get_patient(
+        self,
+        patient_code: str
+    ) -> dict[str, Any] | None:
         """
         Load one patient and all related chronic-care data.
         """
@@ -292,3 +296,258 @@ class ChronicCareRepository:
         patients = self.get_all_patients()
 
         return patients.get(patient_code)
+
+
+
+
+
+    def find_patients_by_condition(
+        self,
+        condition_name: str
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Find patients who have a specific condition.
+
+        This is a read-only query.
+        """
+
+        conditions = (
+            self.db.query(Condition)
+            .filter(
+                Condition.condition_name.ilike(
+                    f"%{condition_name}%"
+                )
+            )
+            .all()
+        )
+
+        patient_ids = {
+            condition.patient_id
+            for condition in conditions
+        }
+
+        if not patient_ids:
+            return {}
+
+        patients = (
+            self.db.query(Patient)
+            .filter(Patient.id.in_(patient_ids))
+            .all()
+        )
+
+        result = {}
+
+        for patient in patients:
+            result[patient.patient_code] = {
+                "patient_id": patient.patient_code,
+                "full_name": (
+                    f"{patient.first_name} {patient.last_name}"
+                ).strip(),
+                "conditions": [
+                    condition.condition_name
+                    for condition in conditions
+                    if condition.patient_id == patient.id
+                ],
+                "assigned_nurse": patient.assigned_nurse,
+                "assigned_doctor": patient.assigned_doctor,
+            }
+
+        return result
+
+
+
+
+    def find_patients_by_medication(
+        self,
+        medication_name: str
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Find patients who are taking a specific medication.
+
+        This is a read-only query.
+        """
+
+        medications = (
+            self.db.query(Medication)
+            .filter(
+                Medication.medication_name.ilike(
+                    f"%{medication_name}%"
+                )
+            )
+            .all()
+        )
+
+        patient_ids = {
+            medication.patient_id
+            for medication in medications
+        }
+
+        if not patient_ids:
+            return {}
+
+        patients = (
+            self.db.query(Patient)
+            .filter(Patient.id.in_(patient_ids))
+            .all()
+        )
+
+        result = {}
+
+        for patient in patients:
+            patient_medications = [
+                {
+                    "name": medication.medication_name,
+                    "dose": medication.dosage,
+                    "frequency": medication.frequency,
+                }
+                for medication in medications
+                if medication.patient_id == patient.id
+            ]
+
+            result[patient.patient_code] = {
+                "patient_id": patient.patient_code,
+                "full_name": (
+                    f"{patient.first_name} {patient.last_name}"
+                ).strip(),
+                "medications": patient_medications,
+                "assigned_nurse": patient.assigned_nurse,
+                "assigned_doctor": patient.assigned_doctor,
+            }
+
+        return result
+
+
+
+
+
+    def find_patients_by_medication(
+            self,
+            medication_name: str
+        ) -> dict[str, dict[str, Any]]:
+            """
+            Find patients who are taking a specific medication.
+            Read-only query.
+            """
+
+            medications = (
+                self.db.query(Medication)
+                .filter(
+                    Medication.medication_name.ilike(
+                        f"%{medication_name}%"
+                    )
+                )
+                .all()
+            )
+
+            patient_ids = {
+                medication.patient_id
+                for medication in medications
+            }
+
+            if not patient_ids:
+                return {}
+
+            patients = (
+                self.db.query(Patient)
+                .filter(Patient.id.in_(patient_ids))
+                .all()
+            )
+
+            result = {}
+
+            for patient in patients:
+                patient_medications = [
+                    {
+                        "name": medication.medication_name,
+                        "dose": medication.dosage,
+                        "frequency": medication.frequency,
+                    }
+                    for medication in medications
+                    if medication.patient_id == patient.id
+                ]
+
+                result[patient.patient_code] = {
+                    "patient_id": patient.patient_code,
+                    "full_name": (
+                        f"{patient.first_name} {patient.last_name}"
+                    ).strip(),
+                    "medications": patient_medications,
+                    "assigned_nurse": patient.assigned_nurse,
+                    "assigned_doctor": patient.assigned_doctor,
+                }
+
+            return result
+
+
+    def find_patients_with_alerts(
+        self,
+        severity: str | None = None,
+        unresolved_only: bool = False
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Find patients with alerts.
+
+        Optional filters:
+        - severity: low, medium, high
+        - unresolved_only: only unresolved alerts
+
+        Read-only query.
+        """
+
+        query = self.db.query(Alert)
+
+        if severity:
+            query = query.filter(
+                Alert.severity.ilike(severity)
+            )
+
+        if unresolved_only:
+            query = query.filter(
+                Alert.resolved.is_(False)
+            )
+
+        alerts = query.all()
+
+        patient_ids = {
+            alert.patient_id
+            for alert in alerts
+        }
+
+        if not patient_ids:
+            return {}
+
+        patients = (
+            self.db.query(Patient)
+            .filter(Patient.id.in_(patient_ids))
+            .all()
+        )
+
+        result = {}
+
+        for patient in patients:
+            patient_alerts = [
+                {
+                    "date": (
+                        alert.created_at.date().isoformat()
+                        if alert.created_at
+                        else None
+                    ),
+                    "severity": alert.severity,
+                    "message": alert.message,
+                    "resolved": alert.resolved,
+                }
+                for alert in alerts
+                if alert.patient_id == patient.id
+            ]
+
+            result[patient.patient_code] = {
+                "patient_id": patient.patient_code,
+                "full_name": (
+                    f"{patient.first_name} {patient.last_name}"
+                ).strip(),
+                "alerts": patient_alerts,
+                "assigned_nurse": patient.assigned_nurse,
+                "assigned_doctor": patient.assigned_doctor,
+            }
+
+        return result
