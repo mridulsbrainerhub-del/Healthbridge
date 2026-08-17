@@ -1,22 +1,12 @@
 import json
 import logging
-import re
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
-from openai import OpenAI
-
-
 
 from .config import (
-    OPENAI_API_KEY,
-    MODEL_NAME,
-    # CHROMA_PERSIST_DIRECTORY,
-    # AURORA_DATA_PATH,
-    PATIENT_DATA_SCHEMA,
-    # CHRONIC_CARE_DATA_PATH,
     REGISTRY_API_URL,
     REGISTRY_API_TIMEOUT,
     REGISTRY_API_ENABLED,
@@ -28,24 +18,17 @@ from .config import (
     CONSOLIDATED_API_TOKEN,
     CONSOLIDATED_API_TIMEOUT,
     CONSOLIDATED_API_ENABLED,
-    get_config_summary
+    get_config_summary,
 )
-from app.schemas.ai.chats import ChatRequest, ChatResponse
-# from .vector_store import VectorStoreManager, create_rag_context
-from .utils import get_system_prompt, get_chronic_care_system_prompt
+
 from .services.registry_client import RegistryClient
 from .services.bof_client import BOFClient
 from .services.consolidated_client import ConsolidatedAPIClient
-from .auth.database import get_pool, close_pool, get_db
-from .db.database import SessionLocal
+
+from .auth.database import get_pool
 from .auth.init_db import initialize_database
 from .auth.router import router as auth_router
 from .auth.admin_router import router as admin_router
-from .auth.dependencies import require_clinical_or_admin, require_nurse, require_doctor
-from .auth.audit import log_action
-
-from .services.chronic_care_repo import ChronicCareRepository
-
 
 from .routers import health
 from .routers import patients
@@ -53,99 +36,179 @@ from .routers import dashboard
 from .routers import chat
 
 
+# ---------------------------------------------------------
+# Logging
+# ---------------------------------------------------------
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Healthbridge Care API", version="3.0.0")
+
+# ---------------------------------------------------------
+# FastAPI application
+# ---------------------------------------------------------
+
+app = FastAPI(
+    title="Healthbridge Care API",
+    version="3.0.0",
+)
+
+
+# ---------------------------------------------------------
+# CORS / Origin Middleware
+# ---------------------------------------------------------
 
 class ReflectOriginMiddleware(BaseHTTPMiddleware):
-    """Reflects request Origin back — supports withCredentials on any port/domain."""
+    """
+    Reflect request Origin back to the client.
+    Supports credentials for the frontend.
+    """
+
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin")
+
         if request.method == "OPTIONS":
             response = StarletteResponse(status_code=204)
         else:
             response = await call_next(request)
+
         if origin:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, ngrok-skip-browser-warning"
+            response.headers["Access-Control-Allow-Methods"] = (
+                "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            )
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Authorization, Content-Type, ngrok-skip-browser-warning"
+            )
             response.headers["Vary"] = "Origin"
+
         return response
+
 
 app.add_middleware(ReflectOriginMiddleware)
 
-app.include_router(auth_router, prefix="/auth", tags=["auth"])
-app.include_router(admin_router, prefix="/admin", tags=["admin"])
+
+# ---------------------------------------------------------
+# Routers
+# ---------------------------------------------------------
+
+app.include_router(
+    auth_router,
+    prefix="/auth",
+    tags=["auth"],
+)
+
+app.include_router(
+    admin_router,
+    prefix="/admin",
+    tags=["admin"],
+)
+
 app.include_router(health.router)
 app.include_router(patients.router)
 app.include_router(dashboard.router)
 app.include_router(chat.router)
 
-client = OpenAI(api_key=OPENAI_API_KEY)
 
-# RAG-based vector store as primary data source
-# vector_store: Optional[VectorStoreManager] = None
+# ---------------------------------------------------------
+# External API clients
+# ---------------------------------------------------------
 
-
-def build_system_prompt(patient_count: int) -> str:
-    if PATIENT_DATA_SCHEMA == "chronic_care":
-        return get_chronic_care_system_prompt(patient_count)
-    return get_system_prompt(patient_count)
-
-# External API clients for enrichment
 registry_client: Optional[RegistryClient] = None
 bof_client: Optional[BOFClient] = None
-
-# Consolidated API client (AI1 via VPN) - when enabled, replaces Registry + BOF direct calls
 consolidated_client: Optional[ConsolidatedAPIClient] = None
 
 
+# ---------------------------------------------------------
+# Application startup
+# ---------------------------------------------------------
+
 @app.on_event("startup")
 async def startup_event():
-    global registry_client, bof_client, consolidated_client
+    global registry_client
+    global bof_client
+    global consolidated_client
 
-    logger.info("Starting Healthbridge Care API v3.0 (RAG-based)")
-    logger.info(f"Configuration: {json.dumps(get_config_summary(), indent=2)}")
+    logger.info(
+        "Starting Healthbridge Care API v3.0"
+    )
 
-    # Initialize PostgreSQL auth DB (creates tables + seeds admin if needed)
+    logger.info(
+        f"Configuration: "
+        f"{json.dumps(get_config_summary(), indent=2)}"
+    )
+
+    # -----------------------------------------------------
+    # Initialize authentication database
+    # -----------------------------------------------------
+
     try:
         pool = await get_pool()
+
         await initialize_database(pool)
-        logger.info("Auth database initialized")
+
+        logger.info(
+            "Auth database initialized"
+        )
+
     except Exception as e:
-        logger.error(f"Failed to initialize auth database:{e}")
-        
-
-    
-        # Initialize Consolidated API client (AI1 via VPN)
-        consolidated_client = ConsolidatedAPIClient(
-            base_url=CONSOLIDATED_API_URL,
-            token=CONSOLIDATED_API_TOKEN,
-            timeout=CONSOLIDATED_API_TIMEOUT,
-            enabled=CONSOLIDATED_API_ENABLED
+        logger.error(
+            f"Failed to initialize auth database: {e}"
         )
 
-        if CONSOLIDATED_API_ENABLED:
-            logger.info(f"Consolidated API enabled - enrichment via AI1 at {CONSOLIDATED_API_URL}")
-        else:
-            logger.info("Consolidated API disabled - using direct Registry and BOF APIs")
+    # -----------------------------------------------------
+    # Initialize consolidated API
+    # -----------------------------------------------------
 
-        # Initialize direct API clients (used when consolidated API is disabled)
-        registry_client = RegistryClient(
-            base_url=REGISTRY_API_URL,
-            timeout=REGISTRY_API_TIMEOUT,
-            enabled=REGISTRY_API_ENABLED and not CONSOLIDATED_API_ENABLED
+    consolidated_client = ConsolidatedAPIClient(
+        base_url=CONSOLIDATED_API_URL,
+        token=CONSOLIDATED_API_TOKEN,
+        timeout=CONSOLIDATED_API_TIMEOUT,
+        enabled=CONSOLIDATED_API_ENABLED,
+    )
+
+    if CONSOLIDATED_API_ENABLED:
+        logger.info(
+            "Consolidated API enabled - "
+            f"enrichment via AI1 at {CONSOLIDATED_API_URL}"
+        )
+    else:
+        logger.info(
+            "Consolidated API disabled - "
+            "using direct Registry and BOF APIs"
         )
 
-        bof_client = BOFClient(
-            base_url=BOF_API_URL,
-            token=BOF_API_TOKEN,
-            timeout=BOF_API_TIMEOUT,
-            enabled=BOF_API_ENABLED and not CONSOLIDATED_API_ENABLED
-        )
+    # -----------------------------------------------------
+    # Initialize Registry API client
+    # -----------------------------------------------------
 
+    registry_client = RegistryClient(
+        base_url=REGISTRY_API_URL,
+        timeout=REGISTRY_API_TIMEOUT,
+        enabled=(
+            REGISTRY_API_ENABLED
+            and not CONSOLIDATED_API_ENABLED
+        ),
+    )
+
+    # -----------------------------------------------------
+    # Initialize BOF API client
+    # -----------------------------------------------------
+
+    bof_client = BOFClient(
+        base_url=BOF_API_URL,
+        token=BOF_API_TOKEN,
+        timeout=BOF_API_TIMEOUT,
+        enabled=(
+            BOF_API_ENABLED
+            and not CONSOLIDATED_API_ENABLED
+        ),
+    )
+
+    logger.info(
+        "Healthbridge Care API startup complete"
+    )
         # Initialize RAG vector store
         # data_path = CHRONIC_CARE_DATA_PATH if PATIENT_DATA_SCHEMA == "chronic_care" else AURORA_DATA_PATH
         # logger.info(f"Initializing RAG vector store ({PATIENT_DATA_SCHEMA}) from: {data_path}")
